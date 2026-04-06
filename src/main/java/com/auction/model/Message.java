@@ -1,40 +1,31 @@
-import java.io.Serializable;  
+package com.auction.model;
 
-public class Message implements Serializable {  
-    private static final long serialVersionUID = 1L;  
-    private String content;  
-    private String sender;  
-    private String receiver;  
+import java.io.Serializable;
 
-    public Message() {}  
+public class Message implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    public enum MessageType {
+        LOGIN, LOGOUT, GET_AUCTIONS, PLACE_BID, AUCTION_UPDATE, 
+        ERROR, SUCCESS, USER_UPDATE, BID_RESULT
+    }
 
-    public Message(String content, String sender, String receiver) {  
-        this.content = content;  
-        this.sender = sender;  
-        this.receiver = receiver;  
-    }  
+    private MessageType type;
+    private String content;
+    private Object data;
 
-    public String getContent() {  
-        return content;  
-    }  
+    public Message(MessageType type, String content, Object data) {
+        this.type = type;
+        this.content = content;
+        this.data = data;
+    }
 
-    public void setContent(String content) {  
-        this.content = content;  
-    }  
+    public MessageType getType() { return type; }
+    public String getContent() { return content; }
+    public Object getData() { return data; }
 
-    public String getSender() {  
-        return sender;  
-    }  
-
-    public void setSender(String sender) {  
-        this.sender = sender;  
-    }  
-
-    public String getReceiver() {  
-        return receiver;  
-    }  
-
-    public void setReceiver(String receiver) {  
-        this.receiver = receiver;  
-    }  
+    @Override
+    public String toString() {
+        return "Message{" + "type=" + type + ", content='" + content + '\'' + '}';
+    }
 }
