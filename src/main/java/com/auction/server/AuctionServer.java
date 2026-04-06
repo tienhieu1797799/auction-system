@@ -1,96 +1,110 @@
+package com.auction.server;
+
+import com.auction.model.*;
 import java.io.*;
 import java.net.*;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class AuctionServer {
-    private static final int PORT = 12345;
-    private static Set<PrintWriter> clientWriters = new HashSet<>();
-    private static List<Auction> auctions = new ArrayList<>();
+    private static final int PORT = 5000;
+    private ServerSocket serverSocket;
+    private List<ClientHandler> connectedClients = new CopyOnWriteArrayList<>();
+    private Map<String, Auction> auctions = new HashMap<>();
+    private Map<String, User> users = new HashMap<>();
+    private List<Bid> bidHistory = new ArrayList<>();
 
-    public static void main(String[] args) {
-        System.out.println("Auction Server is running...");
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+    public AuctionServer() {
+        initializeDatabase();
+    }
+
+    private void initializeDatabase() {
+        users.put("user1", new User("user1", "Alice", "pass123", 5000));
+        users.put("user2", new User("user2", "Bob", "pass123", 3000));
+        users.put("user3", new User("user3", "Charlie", "pass123", 4000));
+
+        LocalDateTime now = LocalDateTime.now();
+        auctions.put("auction1", new Auction("auction1", "Laptop", 
+            "Dell XPS 13", 500, now, now.plusHours(2)));
+        auctions.put("auction2", new Auction("auction2", "Phone", 
+            "iPhone 15", 800, now, now.plusHours(3)));
+        auctions.put("auction3", new Auction("auction3", "Headphones", 
+            "Sony WH-1000XM5", 200, now, now.plusHours(1)));
+    }
+
+    public void start() {
+        try {
+            serverSocket = new ServerSocket(PORT);
+            System.out.println("🟢 Auction Server started on port " + PORT);
+
             while (true) {
-                new ClientHandler(serverSocket.accept()).start();
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("📱 New client connected: " + clientSocket.getInetAddress());
+                
+                ClientHandler handler = new ClientHandler(clientSocket, this);
+                connectedClients.add(handler);
+                new Thread(handler).start();
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    private static class ClientHandler extends Thread {
-        private Socket socket;
-        private PrintWriter out;
-        private String clientName;
+    public synchronized boolean placeBid(String auctionId, String userId, 
+                                        String username, double bidAmount) {
+        Auction auction = auctions.get(auctionId);
+        User user = users.get(userId);
 
-        public ClientHandler(Socket socket) {
-            this.socket = socket;
+        if (auction == null || !auction.isActive()) {
+            return false;
         }
 
-        public void run() {
-            try {
-                InputStream input = socket.getInputStream();
-                out = new PrintWriter(socket.getOutputStream(), true);
-                synchronized (clientWriters) {
-                    clientWriters.add(out);
-                }
-                BufferedReader in = new BufferedReader(new InputStreamReader(input));
-
-                String msg;
-                while ((msg = in.readLine()) != null) {
-                    processMessage(msg);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                try {
-                    socket.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                synchronized (clientWriters) {
-                    clientWriters.remove(out);
-                }
-            }
+        if (bidAmount <= auction.getCurrentPrice() || bidAmount > user.getBalance()) {
+            return false;
         }
 
-        private void processMessage(String msg) {
-            if (msg.startsWith("BID")) {
-                String[] parts = msg.split(" ");
-                String auctionId = parts[1];
-                double bidAmount = Double.parseDouble(parts[2]);
-                handleBid(auctionId, bidAmount);
-            }
-            broadcast(msg);
-        }
+        auction.setCurrentPrice(bidAmount);
+        auction.setHighestBidder(username);
 
-        private void handleBid(String auctionId, double bidAmount) {
-            // Here we would handle the logic for the bid, such as verifying and updating auction status
-            System.out.println("Bid received for auction " + auctionId + ": " + bidAmount);
-        }
+        String bidId = "bid_" + System.currentTimeMillis();
+        Bid bid = new Bid(bidId, auctionId, userId, username, bidAmount, LocalDateTime.now());
+        bidHistory.add(bid);
 
-        private void broadcast(String msg) {
-            synchronized (clientWriters) {
-                for (PrintWriter writer : clientWriters) {
-                    writer.println(msg);
-                }
-            }
+        broadcastAuctionUpdate(auction);
+
+        System.out.println("✅ Bid placed: " + username + " bid $" + bidAmount + " on " + auction.getItemName());
+        return true;
+    }
+
+    public void broadcastAuctionUpdate(Auction auction) {
+        Message msg = new Message(Message.MessageType.AUCTION_UPDATE, 
+            "Auction updated", auction);
+        
+        for (ClientHandler client : connectedClients) {
+            client.sendMessage(msg);
         }
     }
 
-    private static class Auction {
-        private String auctionId;
-        private String item;
-        private double startingPrice;
-        private double highestBid;
+    public Map<String, Auction> getAuctions() {
+        return new HashMap<>(auctions);
+    }
 
-        public Auction(String auctionId, String item, double startingPrice) {
-            this.auctionId = auctionId;
-            this.item = item;
-            this.startingPrice = startingPrice;
-            this.highestBid = startingPrice;
+    public User authenticateUser(String username, String password) {
+        for (User user : users.values()) {
+            if (user.getUsername().equals(username) && user.getPassword().equals(password)) {
+                return user;
+            }
         }
+        return null;
+    }
 
-        // Add getters and additional methods as needed.
+    public void removeClient(ClientHandler handler) {
+        connectedClients.remove(handler);
+        System.out.println("❌ Client disconnected");
+    }
+
+    public static void main(String[] args) {
+        new AuctionServer().start();
     }
 }
